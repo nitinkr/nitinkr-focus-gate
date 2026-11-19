@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Focus Gate",
+  "version": "1.0.0",
+  "description": "Block distracting websites, set daily limits, and redirect blocked visits.",
+  "permissions": ["storage", "declarativeNetRequest", "tabs", "webNavigation", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "service-worker.js" },
+  "action": { "default_title": "Open Focus Gate settings" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "declarative_net_request": { "rule_resources": [] },
+  "web_accessible_resources": [
+    {
+      "resources": ["redirect.html", "redirect.js", "popup.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

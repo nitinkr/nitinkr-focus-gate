@@ -20,3 +20,7 @@ The extension requests `webNavigation` to update active-site tracking and `<all_
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+## Troubleshooting
+
+The browser's extension error log can retain entries from earlier loads. Click **Clear all** in the extension error view, reload Focus Gate from the extensions page, and check whether the error returns before treating it as a current issue.

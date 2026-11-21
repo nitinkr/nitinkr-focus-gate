@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Focus Gate",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Block distracting websites, set daily limits, and redirect blocked visits.",
   "permissions": ["storage", "declarativeNetRequest", "tabs", "webNavigation", "alarms"],
   "host_permissions": ["<all_urls>"],

@@ -28,11 +28,18 @@ function render() {
 async function persist(renderAfter = true) {
   state.destinations = $("#destinations").value.split("\n").map(x => x.trim()).filter(Boolean);
   $("#status").textContent = "Saving…";
-  const result = await chrome.runtime.sendMessage({ type: "saveState", sites: state.sites, destinations: state.destinations });
-  $("#status").textContent = result?.ok ? "Saved" : "Could not save";
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "saveState", sites: state.sites, destinations: state.destinations });
+    $("#status").textContent = result?.ok ? "Saved" : `Could not save${result?.error ? `: ${result.error}` : ""}`;
+  } catch (error) {
+    $("#status").textContent = `Could not save: ${error.message || error}`;
+  }
   if (renderAfter) render();
 }
-chrome.runtime.sendMessage({ type: "getState" }).then(data => { state = data; render(); });
+chrome.runtime.sendMessage({ type: "getState" }).then(data => {
+  if (data?.ok === false) throw new Error(data.error || "Could not load settings");
+  state = data; render();
+}).catch(error => { $("#status").textContent = `Could not load settings: ${error.message || error}`; });
 $("#mode").addEventListener("change", () => { $("#limit-wrap").hidden = $("#mode").value !== "limit"; });
 $("#site-form").addEventListener("submit", async e => {
   e.preventDefault(); const host = $("#domain").value.trim().toLowerCase().replace(/^https?:\/\//, "").split(/[/?#]/)[0].replace(/^www\./, "");

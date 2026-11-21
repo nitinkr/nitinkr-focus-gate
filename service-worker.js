@@ -5,6 +5,7 @@ const DEFAULTS = {
   usageDay: dayKey()
 };
 const TICK = "usage-tick";
+let ruleUpdateQueue = Promise.resolve();
 
 function dayKey() {
   const d = new Date();
@@ -21,18 +22,25 @@ function isBlocked(site, usage) {
   if (site.mode === "limit") return (usage[site.host] || 0) >= Number(site.limitMinutes || 1) * 60;
   return false;
 }
-async function syncRules() {
-  const data = await chrome.storage.local.get(DEFAULTS);
-  const usage = data.usageDay === dayKey() ? data.usage : {};
-  const sites = data.sites || [];
-  const rules = sites.filter(s => s.host && isBlocked(s, usage)).map((s, i) => ({
-    id: i + 1,
-    priority: 1,
-    action: { type: "redirect", redirect: { extensionPath: "/redirect.html" } },
-    condition: { urlFilter: `||${s.host}^`, resourceTypes: ["main_frame"] }
-  }));
-  const old = await chrome.declarativeNetRequest.getDynamicRules();
-  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map(r => r.id), addRules: rules });
+function syncRules() {
+  const update = async () => {
+    const data = await chrome.storage.local.get(DEFAULTS);
+    const usage = data.usageDay === dayKey() ? data.usage : {};
+    const sites = data.sites || [];
+    const rules = sites.filter(s => s.host && isBlocked(s, usage)).map((s, i) => ({
+      id: i + 1,
+      priority: 1,
+      action: { type: "redirect", redirect: { extensionPath: "/redirect.html" } },
+      condition: { urlFilter: `||${s.host}^`, resourceTypes: ["main_frame"] }
+    }));
+    const old = await chrome.declarativeNetRequest.getDynamicRules();
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map(r => r.id), addRules: rules });
+  };
+  // Browser events can trigger rule sync at nearly the same time. Queue them so
+  // each update reads and removes the rules installed by the prior update.
+  const next = ruleUpdateQueue.catch(() => {}).then(update);
+  ruleUpdateQueue = next;
+  return next;
 }
 async function activeSite() {
   const win = await chrome.windows.getLastFocused({ populate: true });
@@ -81,26 +89,39 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     chrome.storage.local.get(DEFAULTS).then(async data => {
       if (data.usageDay !== dayKey()) data = { ...data, usage: {}, usageDay: dayKey() };
       respond({ ...data, today: dayKey() });
+    }).catch(error => {
+      console.error("Could not read Focus Gate settings:", error);
+      respond({ ok: false, error: error.message || String(error) });
     });
     return true;
   }
   if (msg.type === "saveState") {
     (async () => {
-      const sites = (msg.sites || []).map(s => ({ ...s, host: normalizeHost(s.host) })).filter(s => s.host);
-      const destinations = (msg.destinations || []).map(s => s.trim()).filter(s => { try { return new URL(s).protocol.startsWith("http"); } catch { return false; } });
-      await chrome.storage.local.set({ sites, destinations: destinations.length ? destinations : DEFAULTS.destinations });
-      await syncRules();
-      respond({ ok: true });
+      try {
+        const sites = (msg.sites || []).map(s => ({ ...s, host: normalizeHost(s.host) })).filter(s => s.host);
+        const destinations = (msg.destinations || []).map(s => s.trim()).filter(s => { try { return new URL(s).protocol.startsWith("http"); } catch { return false; } });
+        await chrome.storage.local.set({ sites, destinations: destinations.length ? destinations : DEFAULTS.destinations });
+        await syncRules();
+        respond({ ok: true });
+      } catch (error) {
+        console.error("Could not save Focus Gate settings:", error);
+        respond({ ok: false, error: error.message || String(error) });
+      }
     })();
     return true;
   }
   if (msg.type === "toggleSite") {
     (async () => {
-      const data = await chrome.storage.local.get(DEFAULTS);
-      const sites = data.sites.map(s => s.host === msg.host ? { ...s, blocked: !s.blocked } : s);
-      await chrome.storage.local.set({ sites });
-      await syncRules();
-      respond({ ok: true });
+      try {
+        const data = await chrome.storage.local.get(DEFAULTS);
+        const sites = data.sites.map(s => s.host === msg.host ? { ...s, blocked: !s.blocked } : s);
+        await chrome.storage.local.set({ sites });
+        await syncRules();
+        respond({ ok: true });
+      } catch (error) {
+        console.error("Could not update Focus Gate site:", error);
+        respond({ ok: false, error: error.message || String(error) });
+      }
     })();
     return true;
   }

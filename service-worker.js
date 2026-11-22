@@ -31,7 +31,7 @@ function syncRules() {
       id: i + 1,
       priority: 1,
       action: { type: "redirect", redirect: { extensionPath: "/redirect.html" } },
-      condition: { urlFilter: `||${s.host}^`, resourceTypes: ["main_frame"] }
+      condition: { requestDomains: [s.host], resourceTypes: ["main_frame"] }
     }));
     const old = await chrome.declarativeNetRequest.getDynamicRules();
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map(r => r.id), addRules: rules });

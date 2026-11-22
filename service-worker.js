@@ -6,6 +6,8 @@ const DEFAULTS = {
 };
 const TICK = "usage-tick";
 let ruleUpdateQueue = Promise.resolve();
+let blockedSitesForFallback = null;
+const fallbackRedirectingTabs = new Set();
 
 function dayKey() {
   const d = new Date();
@@ -35,6 +37,7 @@ function syncRules() {
     }));
     const old = await chrome.declarativeNetRequest.getDynamicRules();
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map(r => r.id), addRules: rules });
+    blockedSitesForFallback = sites.filter(s => s.host && isBlocked(s, usage));
   };
   // Browser events can trigger rule sync at nearly the same time. Queue them so
   // each update reads and removes the rules installed by the prior update.
@@ -65,6 +68,29 @@ async function accountUsage() {
   await syncRules();
 }
 async function refreshTracking() { await accountUsage(); }
+async function redirectBlockedNavigation(details) {
+  if (details.frameId !== 0 || details.tabId < 0 || fallbackRedirectingTabs.has(details.tabId)) return;
+  let url;
+  try { url = new URL(details.url); } catch { return; }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
+
+  if (blockedSitesForFallback === null) {
+    const data = await chrome.storage.local.get(DEFAULTS);
+    const usage = data.usageDay === dayKey() ? (data.usage || {}) : {};
+    blockedSitesForFallback = (data.sites || []).filter(s => s.host && isBlocked(s, usage));
+  }
+  const host = normalizeHost(details.url);
+  const blocked = blockedSitesForFallback.some(site => host === site.host || host.endsWith(`.${site.host}`));
+  if (!blocked) return;
+
+  fallbackRedirectingTabs.add(details.tabId);
+  try {
+    await chrome.tabs.update(details.tabId, { url: chrome.runtime.getURL("redirect.html") });
+  } catch (error) {
+    fallbackRedirectingTabs.delete(details.tabId);
+    console.warn("Could not redirect blocked navigation:", error);
+  }
+}
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.local.get(null);
   await chrome.storage.local.set({ ...DEFAULTS, ...existing });
@@ -80,8 +106,15 @@ chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === TICK) refreshTracking(); });
 chrome.tabs.onActivated.addListener(refreshTracking);
 chrome.tabs.onUpdated.addListener((id, change, tab) => { if (change.url || change.status === "complete") refreshTracking(); });
+chrome.tabs.onRemoved.addListener(tabId => fallbackRedirectingTabs.delete(tabId));
 chrome.windows.onFocusChanged.addListener(refreshTracking);
-chrome.webNavigation.onCommitted.addListener(details => { if (details.frameId === 0) refreshTracking(); });
+chrome.webNavigation.onBeforeNavigate.addListener(redirectBlockedNavigation);
+chrome.webNavigation.onCommitted.addListener(details => {
+  if (details.frameId === 0) {
+    if (details.url === chrome.runtime.getURL("redirect.html")) fallbackRedirectingTabs.delete(details.tabId);
+    refreshTracking();
+  }
+});
 chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && (changes.sites || changes.usage || changes.destinations)) syncRules(); });
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {

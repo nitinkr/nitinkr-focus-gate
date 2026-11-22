@@ -17,6 +17,8 @@ Daily use counts only while the domain is the active tab and its browser window 
 
 The extension requests `webNavigation` to update active-site tracking and `<all_urls>` host access so DNR rules can match user-entered domains. A fixed destination pool is provided as a starting point.
 
+Focus Gate also checks top-level navigation events as a fallback for pages served directly by a site's service worker or CacheStorage, which may bypass network-level DNR rules.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
